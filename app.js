@@ -277,8 +277,27 @@
       flat.forEach((r) => { h += '<div class="between"><div class="grow"><div class="name">' + esc(r.ex) + '</div><div class="sub">' + r.n + ' ' + plural(r.n, 'тренировка', 'тренировки', 'тренировок') + ' с ' + esc(dLong(r.since)) + '</div></div><div class="right">' + fmt(r.w) + ' кг</div></div>'; });
       h += '</section>';
     }
-    h += recordCard(d, t);
+    h += recordCard(d, t) + weeksChart(wk, curWeek);
     return h + '</main>';
+  }
+
+  // Weekly tonnage bars; the record week is gold, the current (unfinished) week is pale.
+  function weeksChart(wk, curWeek) {
+    const weeks = L.weekTotals(wk).slice(-13);
+    if (weeks.length < 2) return '';
+    let rec = weeks[0];
+    for (const w of L.weekTotals(wk)) if (w.total >= rec.total) rec = w;
+    const sel = weeks.find((w) => w.week === ui.weekSel) || weeks.find((w) => w.week === rec.week) || weeks[weeks.length - 1];
+    const max = Math.max(...weeks.map((w) => w.total), rec.total);
+    let h = '<section class="card"><div class="between"><h2>Тоннаж по неделям</h2><span class="muted sm">тонны</span></div>';
+    h += '<div class="sm"><b>' + (sel.week === rec.week ? '🏆 ' : '') + tons(sel.total) + ' т</b> <span class="muted">· неделя с ' + esc(dLong(sel.week)) + (sel.week === curWeek ? ' (идёт)' : '') + (sel.week === rec.week ? ' · рекорд' : '') + '</span></div>';
+    h += '<div class="weeks" role="group" aria-label="Тоннаж по неделям">';
+    weeks.forEach((w) => {
+      const cls = (w.week === rec.week ? ' rec' : '') + (w.week === curWeek ? ' cur' : '') + (w.week === sel.week ? ' sel' : '');
+      h += '<button type="button" class="wk' + cls + '" data-act="weeksel" data-w="' + w.week + '" aria-label="Неделя с ' + esc(dLong(w.week)) + ': ' + tons(w.total) + ' т"><span class="wkbar" style="height:' + Math.max(3, Math.round(w.total / max * 100)) + '%"></span></button>';
+    });
+    h += '</div><div class="between muted sm"><span>' + esc(dShort(weeks[0].week)) + '</span><span>нажмите на столбец</span><span>' + esc(dShort(weeks[weeks.length - 1].week)) + '</span></div></section>';
+    return h;
   }
 
   function chart(ex) {
@@ -331,6 +350,7 @@
       else ui.r = Math.max(1, ui.r + dd);
     }
     else if (act === 'usew') ui.w = Number(b.dataset.w);
+    else if (act === 'weeksel') ui.weekSel = b.dataset.w;
     else if (act === 'add') {
       db.sets.push({ id: L.newId(), date: todayIso(), slot: ui.slot, ex: ui.active, w: ui.w, r: ui.r });
       save();

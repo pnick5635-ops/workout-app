@@ -83,6 +83,12 @@ button.chip.lime { background: var(--lime-bg); }
 .att { display: grid; grid-template-columns: 24px repeat(var(--cols), minmax(0, 1fr)); gap: 6px 0; justify-items: center; align-items: center; }
 .att > span:first-child, .att > .sm { justify-self: start; }
 
+.weeks { display: flex; align-items: flex-end; gap: 4px; height: 120px; border-bottom: 1px solid var(--line); }
+.wk { flex: 1 1 0; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; display: flex; align-items: flex-end; justify-content: center; }
+.wkbar { width: 100%; max-width: 22px; border-radius: 4px 4px 0 0; background: #5A616B; }
+.wk.rec .wkbar { background: var(--gold); }
+.wk.cur .wkbar { opacity: .45; }
+.wk.sel .wkbar { outline: 2px solid var(--fg); outline-offset: 1px; }
 select { width: 100%; height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--field); }
 .chart { width: 100%; height: auto; display: block; }
 .chart .axis { stroke: var(--line); }
