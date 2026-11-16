@@ -357,7 +357,10 @@
     if (el.dataset.act === 'import' && el.files && el.files[0]) {
       el.files[0].text().then((txt) => {
         const { sets, skipped } = L.importRows(txt);
-        if (!sets.length) throw new Error('В файле не нашлось подходов с весом и повторами');
+        if (!sets.length) {
+          const firstLine = String(txt).replace(/^﻿/, '').split(/\r?\n/)[0].slice(0, 80);
+          throw new Error('в файле нет подходов с датой, весом и повторами. Похоже, это не лист «Журнал».\n\nПервая строка файла: ' + firstLine);
+        }
         const unknown = [...new Set(sets.map((s) => s.ex))].filter((x) => !db.plan.some((p) => p.name === x));
         const msg = 'Найдено подходов: ' + sets.length + (skipped ? '\nПропущено строк без веса или повторов: ' + skipped : '') + (unknown.length ? '\nУпражнения не из плана (в статистику не попадут): ' + unknown.join(', ') : '') + (db.sets.length ? '\n\nТекущие записи (' + db.sets.length + ') будут заменены.' : '') + '\n\nЗагрузить?';
         if (!confirm(msg)) return;
