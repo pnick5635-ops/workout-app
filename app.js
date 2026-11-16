@@ -2,6 +2,7 @@
   'use strict';
   const L = window.WL;
   const KEY = 'workout-app.v1';
+  const APP_VERSION = '5';
   const app = document.getElementById('app');
 
   // ---------- storage ----------
@@ -345,6 +346,7 @@
     h += '<section class="card"><h2>Загрузить историю</h2><div class="muted sm">CSV листа «Журнал» из Google Таблицы или файл, выгруженный из этого приложения. Загруженные записи заменят текущие.</div><label class="btn ghost file">Выбрать CSV-файл<input type="file" accept=".csv,text/csv,text/plain" data-act="import"></label></section>';
     h += '<section class="card"><h2>Резервная копия</h2><div class="muted sm">Сохраните CSV в Файлы или iCloud — на случай, если iPhone очистит данные сайта.</div><button type="button" class="btn ghost" data-act="export"' + (n ? '' : ' disabled') + '>Выгрузить CSV</button></section>';
     h += '<section class="card"><h2>Удалить всё</h2><button type="button" class="btn danger" data-act="wipe"' + (n ? '' : ' disabled') + '>Удалить все записи</button></section>';
+    h += '<div class="muted sm" style="text-align:center">Версия приложения: ' + APP_VERSION + '</div>';
     return h + '</main>';
   }
 
@@ -434,6 +436,14 @@
     if (document.visibilityState === 'visible' && todayIso() !== lastDay) { lastDay = todayIso(); ui.slot = null; ui.active = null; ui.screen = 'today'; render(); }
   });
 
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Updates: check for a new version on every open and reload once it takes over.
+  if ('serviceWorker' in navigator) {
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    }).catch(() => {});
+  }
   render();
 })();
