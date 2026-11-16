@@ -1,5 +1,5 @@
 // Offline cache. Bump VERSION on every release so phones pick up new files.
-const VERSION = 'v3';
+const VERSION = 'v4';
 const FILES = ['./', 'index.html', 'app.css', 'logic.js', 'app.js', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {

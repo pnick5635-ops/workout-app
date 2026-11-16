@@ -8,9 +8,9 @@
   function load() {
     try {
       const d = JSON.parse(localStorage.getItem(KEY) || 'null');
-      if (d && Array.isArray(d.sets)) return { sets: d.sets, plan: Array.isArray(d.plan) && d.plan.length ? d.plan : L.DEFAULT_PLAN };
+      if (d && Array.isArray(d.sets)) return { sets: d.sets, plan: Array.isArray(d.plan) && d.plan.length ? d.plan : L.DEFAULT_PLAN, finished: Array.isArray(d.finished) ? d.finished : [] };
     } catch (e) { /* fall through */ }
-    return { sets: [], plan: L.DEFAULT_PLAN };
+    return { sets: [], plan: L.DEFAULT_PLAN, finished: [] };
   }
   let db = load();
   function save() {
@@ -86,6 +86,7 @@
     const d = derived();
     const t = todayIso();
     if (!ui.slot) ui.slot = L.defaultSlot(db.sets, db.plan, t);
+    if (db.finished.includes(t) && db.sets.some((s) => s.date === t)) return screenFinished(d, t);
     const exs = L.slotExercises(db.plan, ui.slot);
     const counts = exs.map((p) => todaySets(p.name).length);
     const nDone = exs.filter((p, i) => counts[i] >= L.planSets(p)).length;
@@ -121,6 +122,21 @@
     if (db.sets.some((s) => s.date === t)) h += '<button type="button" class="btn ghost" data-act="finish">Завершить тренировку</button>';
     h += '</main>';
     return h;
+  }
+
+  // Today's workout is closed: show a calm finished state instead of the recording screen.
+  function screenFinished(d, t) {
+    const todaySess = d.sess.filter((s) => s.date === t);
+    const tonnage = todaySess.reduce((a, s) => a + s.tonnage, 0);
+    const slot = todaySess.length ? todaySess[0].slot : ui.slot;
+    let h = '<main class="screen"><header class="head col"><h1 class="date">' + esc(dayLong(t)) + '</h1></header>';
+    h += '<section class="card"><div class="row-h"><span class="tick">' + icon.check + '</span><h2>Тренировка ' + esc(slot || '') + ' завершена</h2></div>';
+    h += '<div class="muted sm">' + todaySess.length + ' ' + plural(todaySess.length, 'упражнение', 'упражнения', 'упражнений') + ' · ' + tons(tonnage) + ' т</div>';
+    todaySess.forEach((s) => { h += '<div class="between"><span class="name">' + esc(s.ex) + '</span><span class="right">' + esc(setsText(s.list)) + '</span></div>'; });
+    h += '</section>' + weekCard(d, t);
+    h += '<button type="button" class="btn ghost" data-act="finish">Итог тренировки</button>';
+    h += '<button type="button" class="btn ghost" data-act="reopen">Продолжить запись</button>';
+    return h + '</main>';
   }
 
   function targetText(tg) {
@@ -190,7 +206,7 @@
       h += '</section>';
     }
     h += weekCard(d, t) + recordCard(d, t);
-    h += '<button type="button" class="btn" data-act="go" data-to="today">Готово</button></main>';
+    h += '<button type="button" class="btn" data-act="done">Готово</button></main>';
     return h;
   }
 
@@ -362,10 +378,16 @@
       db.sets = db.sets.filter((s) => s.id !== b.dataset.id); save();
     }
     else if (act === 'finish') { ui.screen = 'summary'; window.scrollTo(0, 0); }
+    else if (act === 'done') {
+      const t = todayIso();
+      if (!db.finished.includes(t)) { db.finished.push(t); save(); }
+      ui.screen = 'today'; ui.active = null; window.scrollTo(0, 0);
+    }
+    else if (act === 'reopen') { db.finished = db.finished.filter((x) => x !== todayIso()); save(); ui.active = null; }
     else if (act === 'export') return doExport();
     else if (act === 'wipe') {
       if (!confirm('Удалить все записи? Это нельзя отменить. Сначала лучше выгрузить CSV.')) return;
-      db.sets = []; save(); ui.active = null;
+      db.sets = []; db.finished = []; save(); ui.active = null;
     }
     else return;
     render();
@@ -384,7 +406,8 @@
         const unknown = [...new Set(sets.map((s) => s.ex))].filter((x) => !db.plan.some((p) => p.name === x));
         const msg = 'Найдено подходов: ' + sets.length + (skipped ? '\nПропущено строк без веса или повторов: ' + skipped : '') + (unknown.length ? '\nУпражнения не из плана (в статистику не попадут): ' + unknown.join(', ') : '') + (db.sets.length ? '\n\nТекущие записи (' + db.sets.length + ') будут заменены.' : '') + '\n\nЗагрузить?';
         if (!confirm(msg)) return;
-        db.sets = sets; save(); ui.active = null; ui.slot = null;
+        db.sets = sets; db.finished = [...new Set(sets.map((s) => s.date))].filter((x) => x < todayIso());
+        save(); ui.active = null; ui.slot = null;
         alert('Готово: загружено ' + sets.length + ' подходов.');
         render();
       }).catch((err) => alert('Не удалось прочитать файл: ' + err.message)).finally(() => { el.value = ''; });
