@@ -2,7 +2,7 @@
   'use strict';
   const L = window.WL;
   const KEY = 'workout-app.v1';
-  const APP_VERSION = '6';
+  const APP_VERSION = '7';
   const app = document.getElementById('app');
 
   // ---------- storage ----------
@@ -89,7 +89,7 @@
     const d = derived();
     const t = todayIso();
     if (!ui.slot) ui.slot = L.defaultSlot(db.sets, db.plan, t);
-    if (db.finished.includes(t) && db.sets.some((s) => s.date === t)) return screenFinished(d, t);
+    if (db.finished.includes(t) && db.sets.some((s) => s.date === t)) return screenWeek(d, t);
     const exs = L.slotExercises(db.plan, ui.slot);
     const counts = exs.map((p) => todaySets(p.name).length);
     const nDone = exs.filter((p, i) => counts[i] >= L.planSets(p)).length;
@@ -127,17 +127,68 @@
     return h;
   }
 
-  // Today's workout is closed: show a calm finished state instead of the recording screen.
-  function screenFinished(d, t) {
-    const todaySess = d.sess.filter((s) => s.date === t);
-    const tonnage = todaySess.reduce((a, s) => a + s.tonnage, 0);
-    let h = '<main class="screen"><header class="head col"><h1 class="date">' + esc(dayLong(t)) + '</h1></header>';
-    h += '<section class="card"><div class="row-h"><span class="tick">' + icon.check + '</span><h2>Тренировка завершена</h2></div>';
-    h += '<div class="muted sm">' + todaySess.length + ' ' + plural(todaySess.length, 'упражнение', 'упражнения', 'упражнений') + ' · ' + tons(tonnage) + ' т</div>';
-    todaySess.forEach((s) => { h += '<div class="between"><span class="name">' + esc(s.ex) + '</span><span class="right">' + esc(setsText(s.list)) + '</span></div>'; });
-    h += '</section>' + weekCard(d, t);
-    h += '<button type="button" class="btn ghost" data-act="finish">Итог тренировки</button>';
-    h += '<button type="button" class="btn ghost" data-act="reopen">Продолжить запись</button>';
+  const SLOT_OFFSET = { 'Пн': 0, 'Ср': 2, 'Пт': 4 };
+
+  // Next planned workout after `t`: the first slot of this week still ahead and not done, else Monday next week.
+  function nextWorkout(d, t) {
+    const wk = L.mondayOf(t);
+    const done = new Set(d.sess.filter((s) => s.week === wk).map((s) => s.slot));
+    for (const s of L.SLOTS) {
+      const date = L.addDays(wk, SLOT_OFFSET[s]);
+      if (date > t && !done.has(s)) return { slot: s, date, sameWeek: true };
+    }
+    return { slot: 'Пн', date: L.addDays(wk, 7), sameWeek: false };
+  }
+
+  // Today's workout is closed: the home screen shows the week and the next workout.
+  function screenWeek(d, t) {
+    const wk = L.mondayOf(t);
+    const weekSess = d.sess.filter((s) => s.week === wk);
+    const doneDate = new Map(); weekSess.forEach((s) => { if (!doneDate.has(s.slot)) doneDate.set(s.slot, s.date); });
+    const total = weekSess.reduce((a, s) => a + s.tonnage, 0);
+    const prevTotal = d.sess.filter((s) => s.week === L.addDays(wk, -7)).reduce((a, s) => a + s.tonnage, 0);
+    const next = nextWorkout(d, t);
+    const weekOver = !next.sameWeek;
+
+    let h = '<main class="screen"><header class="head col"><h1 class="date">' + esc(dayLong(t)) + '</h1>';
+    h += '<h2 class="title">' + (weekOver ? 'Неделя завершена' : 'Неделя с ' + esc(dLong(wk))) + '</h2></header>';
+
+    // week summary
+    h += '<section class="card"><div class="between"><h2 class="lbl">' + (weekOver ? 'Неделя с ' + esc(dLong(wk)) : 'Тренировки недели') + '</h2><b>' + doneDate.size + ' из 3</b></div><div class="dots">';
+    L.SLOTS.forEach((s) => {
+      if (doneDate.has(s)) h += '<button type="button" class="dotl on dotbtn" data-act="daysum" data-date="' + doneDate.get(s) + '" aria-label="Итог тренировки ' + s + '"><span class="dot on"></span>' + s + ' ›</button>';
+      else h += '<span class="dotl"><span class="dot' + (!weekOver && s === next.slot ? ' next' : '') + '"></span>' + s + '</span>';
+    });
+    h += '</div><div class="between sm"><span>Тоннаж недели: <b>' + tons(total) + ' т</b></span>';
+    if (prevTotal > 0) {
+      if (weekOver) { const diff = total - prevTotal; h += '<span class="' + (diff > 0 ? 'lime' : 'muted') + '">' + (diff >= 0 ? '+' : '−') + tons(Math.abs(diff)) + ' т к прошлой</span>'; }
+      else h += '<span class="muted">прошлая неделя ' + tons(prevTotal) + ' т</span>';
+    }
+    h += '</div><div class="muted sm">Нажмите на день, чтобы открыть итог</div></section>';
+
+    // weight records this week
+    // one line per exercise: best before this week → best this week
+    const recMap = new Map();
+    [...new Set(weekSess.map((s) => s.date))].sort().forEach((date) => L.weightRecords(d.sess, date).forEach((r) => {
+      const o = recMap.get(r.ex); recMap.set(r.ex, { ex: r.ex, prevBest: o ? o.prevBest : r.prevBest, weight: r.weight });
+    }));
+    const recs = [...recMap.values()];
+    if (recs.length) {
+      h += '<section class="card gold-card"><div class="row-h gold">' + icon.cup + '<h2>' + recs.length + ' ' + plural(recs.length, 'рекорд', 'рекорда', 'рекордов') + ' веса за неделю</h2></div>';
+      recs.forEach((r) => { h += '<div class="between"><span class="name">' + esc(r.ex) + '</span><span class="right"><span class="tan">' + fmt(r.prevBest) + ' → </span><span class="gold">' + fmt(r.weight) + ' кг</span></span></div>'; });
+      h += '</section>';
+    }
+    h += recordCard(d, t);
+
+    // next workout
+    h += '<section class="card"><div class="between"><h2>Следующая — ' + next.slot + '</h2><span class="muted sm">' + esc(dayLong(next.date)) + '</span></div>';
+    L.slotExercises(db.plan, next.slot).forEach((p) => {
+      const tg = L.target(d.byEx.get(p.name) || [], p);
+      h += '<div class="between"><span class="name">' + esc(p.name) + '</span><span class="right' + (tg && tg.kind === 'add' ? ' lime' : '') + '">' + esc(tg ? targetText(tg) : 'первая запись') + '</span></div>';
+    });
+    h += '</section>';
+
+    h += '<button type="button" class="btn ghost" data-act="reopen">Продолжить запись сегодня</button>';
     return h + '</main>';
   }
 
@@ -169,12 +220,14 @@
 
   function screenSummary() {
     const d = derived();
-    const t = todayIso();
+    const t = ui.sumDate || todayIso();
+    const isToday = t === todayIso();
     const todaySess = d.sess.filter((s) => s.date === t);
     const nSets = db.sets.filter((s) => s.date === t).length;
+    const slot = todaySess.length ? todaySess[0].slot : '';
     const tonnage = todaySess.reduce((a, s) => a + s.tonnage, 0);
     let h = '<main class="screen">';
-    h += '<header class="head col"><h1 class="title">Тренировка записана</h1><div class="muted sm">' + esc(dLong(t)) + ' · ' + todaySess.length + ' ' + plural(todaySess.length, 'упражнение', 'упражнения', 'упражнений') + ' · ' + nSets + ' ' + plural(nSets, 'подход', 'подхода', 'подходов') + ' · ' + tons(tonnage) + ' т</div></header>';
+    h += '<header class="head col"><h1 class="title">' + (isToday ? 'Тренировка записана' : 'Итог тренировки ' + esc(slot)) + '</h1><div class="muted sm">' + esc(dLong(t)) + ' · ' + todaySess.length + ' ' + plural(todaySess.length, 'упражнение', 'упражнения', 'упражнений') + ' · ' + nSets + ' ' + plural(nSets, 'подход', 'подхода', 'подходов') + ' · ' + tons(tonnage) + ' т</div></header>';
 
     const recs = L.weightRecords(d.sess, t);
     if (recs.length) {
@@ -208,7 +261,7 @@
       h += '</section>';
     }
     h += weekCard(d, t) + recordCard(d, t);
-    h += '<button type="button" class="btn" data-act="done">Готово</button></main>';
+    h += isToday ? '<button type="button" class="btn" data-act="done">Готово</button></main>' : '<button type="button" class="btn ghost" data-act="back">Назад</button></main>';
     return h;
   }
 
@@ -380,11 +433,13 @@
       if (!confirm('Удалить этот подход?')) return;
       db.sets = db.sets.filter((s) => s.id !== b.dataset.id); save();
     }
-    else if (act === 'finish') { ui.screen = 'summary'; window.scrollTo(0, 0); }
+    else if (act === 'finish') { ui.sumDate = null; ui.screen = 'summary'; window.scrollTo(0, 0); }
+    else if (act === 'daysum') { ui.sumDate = b.dataset.date; ui.screen = 'summary'; window.scrollTo(0, 0); }
+    else if (act === 'back') { ui.sumDate = null; ui.screen = 'today'; window.scrollTo(0, 0); }
     else if (act === 'done') {
       const t = todayIso();
       if (!db.finished.includes(t)) { db.finished.push(t); save(); }
-      ui.screen = 'today'; ui.active = null; window.scrollTo(0, 0);
+      ui.sumDate = null; ui.screen = 'today'; ui.active = null; window.scrollTo(0, 0);
     }
     else if (act === 'reopen') { db.finished = db.finished.filter((x) => x !== todayIso()); save(); ui.active = null; }
     else if (act === 'export') return doExport();
