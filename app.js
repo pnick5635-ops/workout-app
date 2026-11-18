@@ -2,7 +2,7 @@
   'use strict';
   const L = window.WL;
   const KEY = 'workout-app.v1';
-  const APP_VERSION = '7';
+  const APP_VERSION = '8';
   const app = document.getElementById('app');
 
   // ---------- storage ----------
@@ -81,7 +81,8 @@
 
   // ---------- screens ----------
   function nav() {
-    const tab = (id, label, ic) => '<button type="button" class="tab' + (ui.screen === id ? ' on' : '') + '" data-act="go" data-to="' + id + '"' + (ui.screen === id ? ' aria-current="page"' : '') + '>' + ic + label + '</button>';
+    const cur = ui.screen === 'summary' ? 'today' : ui.screen;
+    const tab = (id, label, ic) => '<button type="button" class="tab' + (cur === id ? ' on' : '') + '" data-act="go" data-to="' + id + '"' + (cur === id ? ' aria-current="page"' : '') + '>' + ic + label + '</button>';
     return '<nav class="nav" aria-label="Разделы">' + tab('today', 'Сегодня', icon.gym) + tab('progress', 'Прогресс', icon.chart) + tab('settings', 'Данные', icon.gear) + '</nav>';
   }
 
@@ -222,12 +223,13 @@
     const d = derived();
     const t = ui.sumDate || todayIso();
     const isToday = t === todayIso();
+    const fromWeek = !!ui.sumFrom;
     const todaySess = d.sess.filter((s) => s.date === t);
     const nSets = db.sets.filter((s) => s.date === t).length;
     const slot = todaySess.length ? todaySess[0].slot : '';
     const tonnage = todaySess.reduce((a, s) => a + s.tonnage, 0);
-    let h = '<main class="screen">';
-    h += '<header class="head col"><h1 class="title">' + (isToday ? 'Тренировка записана' : 'Итог тренировки ' + esc(slot)) + '</h1><div class="muted sm">' + esc(dLong(t)) + ' · ' + todaySess.length + ' ' + plural(todaySess.length, 'упражнение', 'упражнения', 'упражнений') + ' · ' + nSets + ' ' + plural(nSets, 'подход', 'подхода', 'подходов') + ' · ' + tons(tonnage) + ' т</div></header>';
+    let h = '<main class="screen">' + (fromWeek ? '<button type="button" class="backlink" data-act="back">‹ Неделя</button>' : '');
+    h += '<header class="head col"><h1 class="title">' + (isToday && !fromWeek ? 'Тренировка записана' : 'Итог тренировки ' + esc(slot)) + '</h1><div class="muted sm">' + esc(dLong(t)) + ' · ' + todaySess.length + ' ' + plural(todaySess.length, 'упражнение', 'упражнения', 'упражнений') + ' · ' + nSets + ' ' + plural(nSets, 'подход', 'подхода', 'подходов') + ' · ' + tons(tonnage) + ' т</div></header>';
 
     const recs = L.weightRecords(d.sess, t);
     if (recs.length) {
@@ -261,7 +263,7 @@
       h += '</section>';
     }
     h += weekCard(d, t) + recordCard(d, t);
-    h += isToday ? '<button type="button" class="btn" data-act="done">Готово</button></main>' : '<button type="button" class="btn ghost" data-act="back">Назад</button></main>';
+    h += isToday && !fromWeek ? '<button type="button" class="btn" data-act="done">Готово</button></main>' : '<button type="button" class="btn ghost" data-act="back">Назад</button></main>';
     return h;
   }
 
@@ -407,13 +409,13 @@
   // ---------- render & events ----------
   function render() {
     const body = ui.screen === 'summary' ? screenSummary() : ui.screen === 'progress' ? screenProgress() : ui.screen === 'settings' ? screenSettings() : screenToday();
-    app.innerHTML = body + (ui.screen === 'summary' ? '' : nav());
+    app.innerHTML = body + (ui.screen === 'summary' && !ui.sumFrom ? '' : nav());
   }
 
   app.addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
     const act = b.dataset.act;
-    if (act === 'go') { ui.screen = b.dataset.to; window.scrollTo(0, 0); }
+    if (act === 'go') { ui.sumDate = null; ui.sumFrom = null; ui.screen = b.dataset.to; window.scrollTo(0, 0); }
     else if (act === 'slot') { ui.slot = b.dataset.slot; ui.active = null; }
     else if (act === 'open') setActive(b.dataset.ex, derived());
     else if (act === 'step') {
@@ -433,9 +435,9 @@
       if (!confirm('Удалить этот подход?')) return;
       db.sets = db.sets.filter((s) => s.id !== b.dataset.id); save();
     }
-    else if (act === 'finish') { ui.sumDate = null; ui.screen = 'summary'; window.scrollTo(0, 0); }
-    else if (act === 'daysum') { ui.sumDate = b.dataset.date; ui.screen = 'summary'; window.scrollTo(0, 0); }
-    else if (act === 'back') { ui.sumDate = null; ui.screen = 'today'; window.scrollTo(0, 0); }
+    else if (act === 'finish') { ui.sumDate = null; ui.sumFrom = null; ui.screen = 'summary'; window.scrollTo(0, 0); }
+    else if (act === 'daysum') { ui.sumDate = b.dataset.date; ui.sumFrom = 'week'; ui.screen = 'summary'; window.scrollTo(0, 0); }
+    else if (act === 'back') { ui.sumDate = null; ui.sumFrom = null; ui.screen = 'today'; window.scrollTo(0, 0); }
     else if (act === 'done') {
       const t = todayIso();
       if (!db.finished.includes(t)) { db.finished.push(t); save(); }
