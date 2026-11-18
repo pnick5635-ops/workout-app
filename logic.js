@@ -6,22 +6,41 @@
 
   const DEFAULT_PLAN = [
     { name: 'Hammer Press', day: 'Пн', scheme: '3×5–8', top: 8 },
-    { name: 'Рычажная тяга на одну руку', day: 'Пн', scheme: '3×5–8', top: 8 },
+    { name: 'Single-Arm Lever Row', day: 'Пн', scheme: '3×5–8', top: 8 },
     { name: 'Leg Press', day: 'Пн', scheme: '3×5–8', top: 8 },
     { name: 'Lateral Raise', day: 'Пн', scheme: '2×8–15', top: 15 },
-    { name: 'Подъём штанги на бицепс', day: 'Пн', scheme: '3×8–12', top: 12 },
-    { name: 'Икры на платформе', day: 'Пн', scheme: '2×8–15', top: 15 },
-    { name: 'Становая тяга', day: 'Ср', scheme: '3×5', top: 5 },
+    { name: 'Barbell Curl', day: 'Пн', scheme: '3×8–12', top: 12 },
+    { name: 'Calf Raise', day: 'Пн', scheme: '2×8–15', top: 15 },
+    { name: 'Deadlift', day: 'Ср', scheme: '3×5', top: 5 },
     { name: 'Lat Pulldown', day: 'Ср', scheme: '3×5–8', top: 8 },
-    { name: 'Сгибание голени', day: 'Ср', scheme: '3×8–15', top: 15 },
+    { name: 'Leg Curl', day: 'Ср', scheme: '3×8–15', top: 15 },
     { name: 'Rear Delt Machine', day: 'Ср', scheme: '2×8–15', top: 15 },
-    { name: 'Жим гантелей лёжа', day: 'Пт', scheme: '3×8–12', top: 12 },
+    { name: 'Dumbbell Bench Press', day: 'Пт', scheme: '3×8–12', top: 12 },
     { name: 'Incline Dumbbell Row', day: 'Пт', scheme: '3×8–12', top: 12 },
-    { name: 'Болгарский присед', day: 'Пт', scheme: '2×8–12', top: 12 },
+    { name: 'Bulgarian Split Squat', day: 'Пт', scheme: '2×8–12', top: 12 },
     { name: 'Chest Fly Machine', day: 'Пт', scheme: '2×8–12', top: 12 },
     { name: 'Triceps Rope Extension', day: 'Пт', scheme: '2×8–12', top: 12 },
     { name: 'Face Pull', day: 'Ср/Пт', scheme: '2×12–15', top: 15 }
   ];
+
+  // Old Russian names (sheet «Журнал», data saved before v6) → English names.
+  const RENAMES = {
+    'Рычажная тяга на одну руку': 'Single-Arm Lever Row',
+    'Подъём штанги на бицепс': 'Barbell Curl',
+    'Икры на платформе': 'Calf Raise',
+    'Становая тяга': 'Deadlift',
+    'Сгибание голени': 'Leg Curl',
+    'Жим гантелей лёжа': 'Dumbbell Bench Press',
+    'Болгарский присед': 'Bulgarian Split Squat'
+  };
+  const exName = (n) => RENAMES[n] || n;
+  // Renames exercises in saved sets/plan; returns true if anything changed.
+  function migrateNames(db) {
+    let ch = false;
+    for (const x of db.sets) { const n = exName(x.ex); if (n !== x.ex) { x.ex = n; ch = true; } }
+    for (const x of db.plan) { const n = exName(x.name); if (n !== x.name) { x.name = n; ch = true; } }
+    return ch;
+  }
 
   // ---------- dates ----------
   const pad = (n) => String(n).padStart(2, '0');
@@ -79,7 +98,7 @@
     for (const r of body) {
       const date = normDate(r[0]);
       const slot = SLOTS.includes(String(r[1]).trim()) ? String(r[1]).trim() : null;
-      const ex = String(r[2] || '').trim();
+      const ex = exName(String(r[2] || '').trim());
       const w = num(r[3]);
       const repsList = appFormat ? [r[4]] : [r[4], r[5], r[6]];
       const reps = repsList.map(num).filter((x) => x > 0);
@@ -229,7 +248,7 @@
   }
 
   const api = {
-    SLOTS, DEFAULT_PLAN, isoOf, parseIso, addDays, mondayOf, daysBetween, normDate, planSets, slotExercises,
+    SLOTS, DEFAULT_PLAN, RENAMES, exName, migrateNames, isoOf, parseIso, addDays, mondayOf, daysBetween, normDate, planSets, slotExercises,
     parseCSV, importRows, exportCSV, slotOf, sessions, byExercise, suggestWeight, target, topStreak,
     sameWeightRun, weekly, weekTotals, recordWeek, defaultSlot, weightRecords, newId
   };

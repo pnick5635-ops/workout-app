@@ -2,7 +2,7 @@
   'use strict';
   const L = window.WL;
   const KEY = 'workout-app.v1';
-  const APP_VERSION = '5';
+  const APP_VERSION = '6';
   const app = document.getElementById('app');
 
   // ---------- storage ----------
@@ -14,6 +14,8 @@
     return { sets: [], plan: L.DEFAULT_PLAN, finished: [] };
   }
   let db = load();
+  if (db.plan === L.DEFAULT_PLAN) db.plan = L.DEFAULT_PLAN.map((p) => ({ ...p }));
+  if (L.migrateNames(db)) save();
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(db)); }
     catch (e) { alert('Не удалось сохранить: ' + e.message); }
@@ -129,9 +131,8 @@
   function screenFinished(d, t) {
     const todaySess = d.sess.filter((s) => s.date === t);
     const tonnage = todaySess.reduce((a, s) => a + s.tonnage, 0);
-    const slot = todaySess.length ? todaySess[0].slot : ui.slot;
     let h = '<main class="screen"><header class="head col"><h1 class="date">' + esc(dayLong(t)) + '</h1></header>';
-    h += '<section class="card"><div class="row-h"><span class="tick">' + icon.check + '</span><h2>Тренировка ' + esc(slot || '') + ' завершена</h2></div>';
+    h += '<section class="card"><div class="row-h"><span class="tick">' + icon.check + '</span><h2>Тренировка завершена</h2></div>';
     h += '<div class="muted sm">' + todaySess.length + ' ' + plural(todaySess.length, 'упражнение', 'упражнения', 'упражнений') + ' · ' + tons(tonnage) + ' т</div>';
     todaySess.forEach((s) => { h += '<div class="between"><span class="name">' + esc(s.ex) + '</span><span class="right">' + esc(setsText(s.list)) + '</span></div>'; });
     h += '</section>' + weekCard(d, t);
