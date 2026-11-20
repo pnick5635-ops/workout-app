@@ -2,7 +2,7 @@
   'use strict';
   const L = window.WL;
   const KEY = 'workout-app.v1';
-  const APP_VERSION = '8';
+  const APP_VERSION = '10';
   const app = document.getElementById('app');
 
   // ---------- storage ----------
@@ -20,7 +20,37 @@
     try { localStorage.setItem(KEY, JSON.stringify(db)); }
     catch (e) { alert('Не удалось сохранить: ' + e.message); }
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    markDirty();
   }
+
+  // ---------- Google Sheets sync ----------
+  // The whole log is sent to an Apps Script web app bound to the Google Sheet,
+  // which rewrites the tab «Приложение». Full replace: edits and deletions sync too.
+  const SYNC_KEY = 'workout-app.sync';
+  function loadSync() { try { return JSON.parse(localStorage.getItem(SYNC_KEY) || 'null') || {}; } catch (e) { return {}; } }
+  let sync = loadSync();
+  function saveSync() { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) { /* ignore */ } }
+  let syncTimer = null, syncBusy = false;
+  function markDirty() {
+    if (!sync.url) return;
+    sync.dirty = true; saveSync();
+    clearTimeout(syncTimer); syncTimer = setTimeout(pushSync, 2000);
+  }
+  function pushSync() {
+    if (!sync.url || syncBusy) return Promise.resolve(false);
+    syncBusy = true;
+    const body = JSON.stringify({ app: 'workout-app', csv: L.exportCSV(db.sets) });
+    return fetch(sync.url, { method: 'POST', body })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!j || !j.ok) throw new Error((j && j.error) || 'неизвестный ответ');
+        sync.dirty = false; sync.last = new Date().toISOString(); sync.count = j.count; sync.err = null; return true;
+      })
+      .catch((e) => { sync.err = e.message || String(e); return false; })
+      .finally(() => { syncBusy = false; saveSync(); if (ui.screen === 'settings') render(); });
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && sync.url && sync.dirty) pushSync(); });
+  window.addEventListener('online', () => { if (sync.url && sync.dirty) pushSync(); });
 
   // ---------- helpers ----------
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -174,20 +204,25 @@
       const o = recMap.get(r.ex); recMap.set(r.ex, { ex: r.ex, prevBest: o ? o.prevBest : r.prevBest, weight: r.weight });
     }));
     const recs = [...recMap.values()];
+    const rec = L.recordWeek(L.weekly(d.sess, db.plan), wk);
+    const recordNow = rec && rec.isCurrent && rec.count > 1;
+    if (recordNow) h += recordHero(rec);
     if (recs.length) {
       h += '<section class="card gold-card"><div class="row-h gold">' + icon.cup + '<h2>' + recs.length + ' ' + plural(recs.length, 'рекорд', 'рекорда', 'рекордов') + ' веса за неделю</h2></div>';
       recs.forEach((r) => { h += '<div class="between"><span class="name">' + esc(r.ex) + '</span><span class="right"><span class="tan">' + fmt(r.prevBest) + ' → </span><span class="gold">' + fmt(r.weight) + ' кг</span></span></div>'; });
       h += '</section>';
     }
-    h += recordCard(d, t);
+    if (!recordNow) h += recordCard(d, t);
 
-    // next workout
-    h += '<section class="card"><div class="between"><h2>Следующая — ' + next.slot + '</h2><span class="muted sm">' + esc(dayLong(next.date)) + '</span></div>';
-    L.slotExercises(db.plan, next.slot).forEach((p) => {
-      const tg = L.target(d.byEx.get(p.name) || [], p);
-      h += '<div class="between"><span class="name">' + esc(p.name) + '</span><span class="right' + (tg && tg.kind === 'add' ? ' lime' : '') + '">' + esc(tg ? targetText(tg) : 'первая запись') + '</span></div>';
-    });
-    h += '</section>';
+    // next workout — only mid-week; the final week screen is a summary
+    if (!weekOver) {
+      h += '<section class="card"><div class="between"><h2>Следующая — ' + next.slot + '</h2><span class="muted sm">' + esc(dayLong(next.date)) + '</span></div>';
+      L.slotExercises(db.plan, next.slot).forEach((p) => {
+        const tg = L.target(d.byEx.get(p.name) || [], p);
+        h += '<div class="between"><span class="name">' + esc(p.name) + '</span><span class="right' + (tg && tg.kind === 'add' ? ' lime' : '') + '">' + esc(tg ? targetText(tg) : 'первая запись') + '</span></div>';
+      });
+      h += '</section>';
+    }
 
     h += '<button type="button" class="btn ghost" data-act="reopen">Продолжить запись сегодня</button>';
     return h + '</main>';
@@ -274,11 +309,25 @@
       L.SLOTS.map((s) => '<span class="dotl' + (done.has(s) ? ' on' : '') + '"><span class="dot' + (done.has(s) ? ' on' : '') + '"></span>' + s + '</span>').join('') + '</div></section>';
   }
 
+  // "16–22 ноября" / "30 ноября – 6 декабря"
+  function weekRange(wk) {
+    const end = L.addDays(wk, 6);
+    return wk.slice(5, 7) === end.slice(5, 7) ? Number(wk.slice(8)) + '–' + dLong(end) : dLong(wk) + ' – ' + dLong(end);
+  }
+
+  // The current week is the best ever: a filled gold banner on top of the week screen.
+  function recordHero(rec) {
+    let h = '<section class="card hero-gold"><div class="row-h">' + icon.cup + '<h2>Рекордная неделя</h2></div>';
+    h += '<div class="hero-num">' + tons(rec.total) + ' т</div>';
+    h += '<div class="sm">Лучший тоннаж за всё время' + (rec.prevBest ? ' · прошлый рекорд ' + tons(rec.prevBest) + ' т' : '') + '</div>';
+    return h + '</section>';
+  }
+
   function recordCard(d, t) {
     const rec = L.recordWeek(L.weekly(d.sess, db.plan), L.mondayOf(t));
     if (!rec) return '';
     const pct = rec.total > 0 ? Math.round(rec.current / rec.total * 100) : 0;
-    let h = '<section class="card"><div class="between"><div class="row-h gold">' + icon.cup + '<h2 class="fg">Рекордная неделя</h2></div><span class="muted sm">с ' + esc(dLong(rec.week)) + ' · ' + tons(rec.total) + ' т</span></div>';
+    let h = '<section class="card"><div class="between"><div class="row-h gold">' + icon.cup + '<h2 class="fg">Рекордная неделя</h2></div><b>' + tons(rec.total) + ' т</b></div><div class="muted sm">' + esc(weekRange(rec.week)) + '</div>';
     h += '<div class="bar gold" role="img" aria-label="Эта неделя: ' + pct + '% рекорда"><div style="width:' + Math.min(100, pct) + '%"></div></div>';
     if (rec.isCurrent && rec.count > 1) {
       h += '<div class="sm">Эта неделя — новый рекорд: <b>' + tons(rec.total) + ' т</b>' + (rec.prevBest ? ', прошлый лучший ' + tons(rec.prevBest) + ' т' : '') + '</div>';
@@ -397,13 +446,29 @@
   function screenSettings() {
     const n = db.sets.length;
     const dates = [...new Set(db.sets.map((s) => s.date))].sort();
-    let h = '<main class="screen"><header class="head col"><h1 class="title">Данные</h1><div class="muted sm">Всё хранится только на этом телефоне.</div></header>';
+    let h = '<main class="screen"><header class="head col"><h1 class="title">Данные</h1><div class="muted sm">' + (sync.url ? 'Хранится на телефоне, копия — в Google Таблице.' : 'Всё хранится только на этом телефоне.') + '</div></header>';
     h += '<section class="card"><h2>Записи</h2><div class="muted sm">' + (n ? n + ' ' + plural(n, 'подход', 'подхода', 'подходов') + ' · ' + dates.length + ' ' + plural(dates.length, 'день', 'дня', 'дней') + ' · ' + esc(dLong(dates[0])) + ' — ' + esc(dLong(dates[dates.length - 1])) : 'пока пусто') + '</div></section>';
     h += '<section class="card"><h2>Загрузить историю</h2><div class="muted sm">CSV листа «Журнал» из Google Таблицы или файл, выгруженный из этого приложения. Загруженные записи заменят текущие.</div><label class="btn ghost file">Выбрать CSV-файл<input type="file" accept=".csv,text/csv,text/plain" data-act="import"></label></section>';
     h += '<section class="card"><h2>Резервная копия</h2><div class="muted sm">Сохраните CSV в Файлы или iCloud — на случай, если iPhone очистит данные сайта.</div><button type="button" class="btn ghost" data-act="export"' + (n ? '' : ' disabled') + '>Выгрузить CSV</button></section>';
+    h += syncCard();
     h += '<section class="card"><h2>Удалить всё</h2><button type="button" class="btn danger" data-act="wipe"' + (n ? '' : ' disabled') + '>Удалить все записи</button></section>';
     h += '<div class="muted sm" style="text-align:center">Версия приложения: ' + APP_VERSION + '</div>';
     return h + '</main>';
+  }
+
+  function syncCard() {
+    let h = '<section class="card"><h2>Google Таблица</h2>';
+    if (!sync.url) {
+      h += '<div class="muted sm">Вставьте адрес веб-приложения Apps Script из таблицы «Full body — журнал». После этого все записи будут автоматически копироваться на лист «Приложение».</div>';
+      h += '<input type="url" class="txt" id="syncUrl" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false">';
+      h += '<button type="button" class="btn ghost" data-act="syncset">Подключить</button>';
+    } else {
+      const when = sync.last ? new Intl.DateTimeFormat('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(new Date(sync.last)) : null;
+      h += '<div class="sm">' + (sync.err ? '<span class="red">Ошибка: ' + esc(sync.err) + '</span>' : syncBusy ? 'Отправка…' : sync.dirty ? 'Есть неотправленные изменения' : when ? 'Отправлено ' + esc(when) + (sync.count != null ? ' · ' + sync.count + ' ' + plural(sync.count, 'подход', 'подхода', 'подходов') : '') : 'Ещё не отправлялось') + '</div>';
+      h += '<button type="button" class="btn ghost" data-act="syncnow"' + (syncBusy ? ' disabled' : '') + '>Отправить сейчас</button>';
+      h += '<button type="button" class="linkbtn" data-act="syncoff">Отключить</button>';
+    }
+    return h + '</section>';
   }
 
   // ---------- render & events ----------
@@ -445,6 +510,13 @@
     }
     else if (act === 'reopen') { db.finished = db.finished.filter((x) => x !== todayIso()); save(); ui.active = null; }
     else if (act === 'export') return doExport();
+    else if (act === 'syncset') {
+      const v = (document.getElementById('syncUrl').value || '').trim();
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(v)) { alert('Нужен адрес вида https://script.google.com/macros/s/…/exec'); return; }
+      sync = { url: v, dirty: true }; saveSync(); pushSync();
+    }
+    else if (act === 'syncnow') { sync.dirty = true; saveSync(); pushSync(); }
+    else if (act === 'syncoff') { if (!confirm('Отключить копирование в Google Таблицу? Данные в таблице останутся.')) return; sync = {}; saveSync(); }
     else if (act === 'wipe') {
       if (!confirm('Удалить все записи? Это нельзя отменить. Сначала лучше выгрузить CSV.')) return;
       db.sets = []; db.finished = []; save(); ui.active = null;
