@@ -106,3 +106,7 @@ select { width: 100%; height: 44px; padding: 0 12px; border-radius: 10px; border
 .tab.on { color: var(--lime); font-weight: 600; }
 
 .backlink { background: none; border: 0; padding: 8px 0; font: inherit; font-size: 16px; font-weight: 600; color: var(--lime); align-self: flex-start; }
+
+.txt { width: 100%; height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--field); font-size: 16px; }
+.linkbtn { background: none; border: 0; color: var(--muted); font-size: 14px; padding: 4px; }
+.red { color: var(--red); }
