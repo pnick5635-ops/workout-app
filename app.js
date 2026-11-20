@@ -2,7 +2,7 @@
   'use strict';
   const L = window.WL;
   const KEY = 'workout-app.v1';
-  const APP_VERSION = '12';
+  const APP_VERSION = '13';
   const app = document.getElementById('app');
 
   // ---------- Google Sheets sync ----------
@@ -115,9 +115,9 @@
     const t = todayIso();
     const rec = db.sets.filter((s) => s.date === t).map((s) => L.slotOf(s, db.plan)).filter(Boolean);
     if (rec.length) return rec[rec.length - 1];
-    const wd = (L.parseIso(t).getDay() + 6) % 7;
-    return wd === 0 ? 'Пн' : wd === 2 ? 'Ср' : wd === 4 ? 'Пт' : null;
+    return L.dayOf(t); // Пн/Ср/Пт, or an off-plan day (Вт, Чт, Сб, Вс) — its own workout
   }
+  const isPlanSlot = (s) => L.SLOTS.includes(s);
   const weekdayName = () => dFmt(todayIso(), { weekday: 'long' });
 
   function setActive(ex, d) { ui.active = ex; if (ex) prefill(ex, d); }
@@ -145,7 +145,8 @@
     h += '<header class="head"><h1 class="date">' + esc(dayLong(t)) + '</h1>';
     h += '<div class="seg" role="group" aria-label="День плана">' + L.SLOTS.map((s) => '<button type="button" data-act="slot" data-slot="' + s + '" aria-pressed="' + (s === ui.slot) + '"' + (s === ui.slot ? ' class="on"' : '') + '>' + s + '</button>').join('') + '</div></header>';
     const expSlot = todaysSlot();
-    if (expSlot && ui.slot !== expSlot) h += '<div class="warn sm">Упражнения тренировки <b>' + ui.slot + '</b> запишутся в сегодняшнюю тренировку <b>' + expSlot + '</b>. <button type="button" class="linkbtn lime" data-act="slot" data-slot="' + expSlot + '">Вернуться к ' + expSlot + '</button></div>';
+    if (!isPlanSlot(expSlot)) h += '<div class="warn sm">Сегодня ' + esc(weekdayName()) + ' — подходы запишутся как отдельная тренировка <b>' + expSlot + '</b>. Упражнения можно брать с любой вкладки.</div>';
+    else if (ui.slot !== expSlot) h += '<div class="warn sm">Упражнения тренировки <b>' + ui.slot + '</b> запишутся в сегодняшнюю тренировку <b>' + expSlot + '</b>. <button type="button" class="linkbtn lime" data-act="slot" data-slot="' + expSlot + '">Вернуться к ' + expSlot + '</button></div>';
     h += '<div class="prog"><div class="bar"><div style="width:' + Math.round(nDone / Math.max(1, exs.length) * 100) + '%"></div></div><span>' + nDone + ' из ' + exs.length + ' ' + plural(exs.length, 'упражнения', 'упражнений', 'упражнений') + '</span></div>';
 
     exs.forEach((p, i) => {
@@ -201,7 +202,7 @@
 
     // week summary
     h += '<section class="card"><div class="between"><h2 class="lbl">' + (weekOver ? 'Неделя с ' + esc(dLong(wk)) : 'Тренировки недели') + '</h2><b>' + doneDate.size + ' из 3</b></div><div class="dots">';
-    L.SLOTS.forEach((s) => {
+    L.DAYS.filter((s) => isPlanSlot(s) || doneDate.has(s)).forEach((s) => {
       if (doneDate.has(s)) h += '<button type="button" class="dotl on dotbtn" data-act="daysum" data-date="' + doneDate.get(s) + '" aria-label="Итог тренировки ' + s + '"><span class="dot on"></span>' + s + ' ›</button>';
       else if (L.addDays(wk, SLOT_OFFSET[s]) < t) h += '<span class="dotl miss" aria-label="' + s + ' — пропущена"><span class="dot miss"></span>' + s + '</span>';
       else h += '<span class="dotl"><span class="dot' + (!weekOver && s === next.slot ? ' next' : '') + '"></span>' + s + '</span>';
@@ -322,7 +323,7 @@
     const wk = L.mondayOf(t);
     const done = new Set(d.sess.filter((s) => s.week === wk).map((s) => s.slot));
     return '<section class="card"><div class="between"><h2 class="lbl">Неделя с ' + esc(dLong(wk)) + '</h2><b>' + done.size + ' из 3</b></div><div class="dots">' +
-      L.SLOTS.map((s) => { const st = done.has(s) ? ' on' : L.addDays(wk, SLOT_OFFSET[s]) < t ? ' miss' : ''; return '<span class="dotl' + st + '"' + (st === ' miss' ? ' aria-label="' + s + ' — пропущена"' : '') + '><span class="dot' + st + '"></span>' + s + '</span>'; }).join('') + '</div></section>';
+      L.DAYS.filter((s) => isPlanSlot(s) || done.has(s)).map((s) => { const st = done.has(s) ? ' on' : L.addDays(wk, SLOT_OFFSET[s]) < t ? ' miss' : ''; return '<span class="dotl' + st + '"' + (st === ' miss' ? ' aria-label="' + s + ' — пропущена"' : '') + '><span class="dot' + st + '"></span>' + s + '</span>'; }).join('') + '</div></section>';
   }
 
   // "16–22 ноября" / "30 ноября – 6 декабря"
@@ -371,7 +372,9 @@
     const shown = allWeeks.slice(-13);
     const has = new Set(wk.map((r) => r.week + '|' + r.slot));
     const full = allWeeks.filter((w) => w < curWeek);
-    const doneFull = wk.filter((r) => r.week < curWeek).length;
+    // Workouts per full week (off-plan days count too), at most 3 per week.
+    const perWeek = new Map(); wk.filter((r) => r.week < curWeek).forEach((r) => perWeek.set(r.week, (perWeek.get(r.week) || 0) + 1));
+    const doneFull = [...perWeek.values()].reduce((a, n) => a + Math.min(3, n), 0);
     const adh = full.length ? Math.round(doneFull / (full.length * 3) * 100) : null;
     h += '<section class="card"><div class="between"><div><h2>Посещаемость</h2><div class="muted sm">' + (full.length ? doneFull + ' из ' + full.length * 3 + ' за ' + full.length + ' ' + plural(full.length, 'полную неделю', 'полные недели', 'полных недель') : 'первая неделя') + '</div></div>' + (adh != null ? '<div class="big lime">' + adh + '%</div>' : '') + '</div>';
     h += '<div class="att" style="--cols:' + shown.length + '">';
@@ -512,13 +515,13 @@
       // Recording into another day's workout needs an explicit yes, once per day and slot.
       const expSlot = todaysSlot();
       const okKey = todayIso() + '|' + ui.slot;
-      if (expSlot && ui.slot !== expSlot && ui.slotOk !== okKey) {
+      if (isPlanSlot(expSlot) && ui.slot !== expSlot && ui.slotOk !== okKey) {
         if (!confirm('«' + ui.active + '» — упражнение тренировки ' + ui.slot + '. Добавить его в сегодняшнюю тренировку ' + expSlot + '? Тренировка ' + ui.slot + ' останется отдельной.')) return;
         ui.slotOk = okKey;
       }
       ui.lastAdd = Date.now();
       // Sets belong to the workout actually done today, whichever tab the exercise was taken from.
-      db.sets.push({ id: L.newId(), date: todayIso(), slot: expSlot || ui.slot, ex: ui.active, w: ui.w, r: ui.r });
+      db.sets.push({ id: L.newId(), date: todayIso(), slot: expSlot, ex: ui.active, w: ui.w, r: ui.r });
       save();
       const p = db.plan.find((x) => x.name === ui.active);
       if (todaySets(ui.active).length >= L.planSets(p)) ui.active = null; else prefill(ui.active, derived());

@@ -3,6 +3,9 @@
   'use strict';
 
   const SLOTS = ['Пн', 'Ср', 'Пт'];
+  // Any weekday a workout can happen on; off-plan days (Вт, Чт, Сб, Вс) are their own workouts.
+  const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  const dayOf = (iso) => DAYS[(parseIso(iso).getDay() + 6) % 7];
 
   const DEFAULT_PLAN = [
     { name: 'Hammer Press', day: 'Пн', scheme: '3×5–8', top: 8 },
@@ -97,7 +100,7 @@
     const sets = []; let skipped = 0;
     for (const r of body) {
       const date = normDate(r[0]);
-      const slot = SLOTS.includes(String(r[1]).trim()) ? String(r[1]).trim() : null;
+      const slot = DAYS.includes(String(r[1]).trim()) ? String(r[1]).trim() : null;
       const ex = exName(String(r[2] || '').trim());
       const w = num(r[3]);
       const repsList = appFormat ? [r[4]] : [r[4], r[5], r[6]];
@@ -119,7 +122,7 @@
   // ---------- derived ----------
   // Slot of a set: as recorded; else from the plan (Ср/Пт by weekday).
   function slotOf(s, plan) {
-    if (SLOTS.includes(s.slot)) return s.slot;
+    if (DAYS.includes(s.slot)) return s.slot;
     const p = plan.find((x) => x.name === s.ex);
     if (!p) return null;
     if (p.day === 'Ср/Пт') return parseIso(s.date).getDay() === 3 ? 'Ср' : 'Пт';
@@ -198,7 +201,7 @@
     return [...m.values()].map((r) => {
       const missing = slotExercises(plan, r.slot).map((p) => p.name).filter((e) => !r.done.has(e));
       return { week: r.week, slot: r.slot, tonnage: r.tonnage, complete: missing.length === 0, missing };
-    }).sort((a, b) => ((a.week + SLOTS.indexOf(a.slot)) < (b.week + SLOTS.indexOf(b.slot)) ? -1 : 1));
+    }).sort((a, b) => ((a.week + DAYS.indexOf(a.slot)) < (b.week + DAYS.indexOf(b.slot)) ? -1 : 1));
   }
 
   function weekTotals(wk) {
@@ -225,7 +228,8 @@
   // Slot to show today: the slot already started today, else the first slot of this week not yet done.
   function defaultSlot(sets, plan, today) {
     const todays = sets.filter((s) => s.date === today);
-    if (todays.length) return slotOf(todays[todays.length - 1], plan) || 'Пн';
+    // The tab to show: today's plan slot if today's workout is one; an off-day workout (Сб…) falls through to a plan tab.
+    if (todays.length) { const t0 = slotOf(todays[todays.length - 1], plan); if (SLOTS.includes(t0)) return t0; }
     const wk = mondayOf(today);
     const done = new Set(sets.filter((s) => mondayOf(s.date) === wk).map((s) => slotOf(s, plan)));
     const wd = (parseIso(today).getDay() + 6) % 7; // 0 = Mon
@@ -248,7 +252,7 @@
   }
 
   const api = {
-    SLOTS, DEFAULT_PLAN, RENAMES, exName, migrateNames, isoOf, parseIso, addDays, mondayOf, daysBetween, normDate, planSets, slotExercises,
+    SLOTS, DAYS, dayOf, DEFAULT_PLAN, RENAMES, exName, migrateNames, isoOf, parseIso, addDays, mondayOf, daysBetween, normDate, planSets, slotExercises,
     parseCSV, importRows, exportCSV, slotOf, sessions, byExercise, suggestWeight, target, topStreak,
     sameWeightRun, weekly, weekTotals, recordWeek, defaultSlot, weightRecords, newId
   };
