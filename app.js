@@ -2,7 +2,7 @@
   'use strict';
   const L = window.WL;
   const KEY = 'workout-app.v1';
-  const APP_VERSION = '8';
+  const APP_VERSION = '9';
   const app = document.getElementById('app');
 
   // ---------- storage ----------
@@ -174,20 +174,25 @@
       const o = recMap.get(r.ex); recMap.set(r.ex, { ex: r.ex, prevBest: o ? o.prevBest : r.prevBest, weight: r.weight });
     }));
     const recs = [...recMap.values()];
+    const rec = L.recordWeek(L.weekly(d.sess, db.plan), wk);
+    const recordNow = rec && rec.isCurrent && rec.count > 1;
+    if (recordNow) h += recordHero(rec);
     if (recs.length) {
       h += '<section class="card gold-card"><div class="row-h gold">' + icon.cup + '<h2>' + recs.length + ' ' + plural(recs.length, 'рекорд', 'рекорда', 'рекордов') + ' веса за неделю</h2></div>';
       recs.forEach((r) => { h += '<div class="between"><span class="name">' + esc(r.ex) + '</span><span class="right"><span class="tan">' + fmt(r.prevBest) + ' → </span><span class="gold">' + fmt(r.weight) + ' кг</span></span></div>'; });
       h += '</section>';
     }
-    h += recordCard(d, t);
+    if (!recordNow) h += recordCard(d, t);
 
-    // next workout
-    h += '<section class="card"><div class="between"><h2>Следующая — ' + next.slot + '</h2><span class="muted sm">' + esc(dayLong(next.date)) + '</span></div>';
-    L.slotExercises(db.plan, next.slot).forEach((p) => {
-      const tg = L.target(d.byEx.get(p.name) || [], p);
-      h += '<div class="between"><span class="name">' + esc(p.name) + '</span><span class="right' + (tg && tg.kind === 'add' ? ' lime' : '') + '">' + esc(tg ? targetText(tg) : 'первая запись') + '</span></div>';
-    });
-    h += '</section>';
+    // next workout — only mid-week; the final week screen is a summary
+    if (!weekOver) {
+      h += '<section class="card"><div class="between"><h2>Следующая — ' + next.slot + '</h2><span class="muted sm">' + esc(dayLong(next.date)) + '</span></div>';
+      L.slotExercises(db.plan, next.slot).forEach((p) => {
+        const tg = L.target(d.byEx.get(p.name) || [], p);
+        h += '<div class="between"><span class="name">' + esc(p.name) + '</span><span class="right' + (tg && tg.kind === 'add' ? ' lime' : '') + '">' + esc(tg ? targetText(tg) : 'первая запись') + '</span></div>';
+      });
+      h += '</section>';
+    }
 
     h += '<button type="button" class="btn ghost" data-act="reopen">Продолжить запись сегодня</button>';
     return h + '</main>';
@@ -274,11 +279,25 @@
       L.SLOTS.map((s) => '<span class="dotl' + (done.has(s) ? ' on' : '') + '"><span class="dot' + (done.has(s) ? ' on' : '') + '"></span>' + s + '</span>').join('') + '</div></section>';
   }
 
+  // "16–22 ноября" / "30 ноября – 6 декабря"
+  function weekRange(wk) {
+    const end = L.addDays(wk, 6);
+    return wk.slice(5, 7) === end.slice(5, 7) ? Number(wk.slice(8)) + '–' + dLong(end) : dLong(wk) + ' – ' + dLong(end);
+  }
+
+  // The current week is the best ever: a filled gold banner on top of the week screen.
+  function recordHero(rec) {
+    let h = '<section class="card hero-gold"><div class="row-h">' + icon.cup + '<h2>Рекордная неделя</h2></div>';
+    h += '<div class="hero-num">' + tons(rec.total) + ' т</div>';
+    h += '<div class="sm">Лучший тоннаж за всё время' + (rec.prevBest ? ' · прошлый рекорд ' + tons(rec.prevBest) + ' т' : '') + '</div>';
+    return h + '</section>';
+  }
+
   function recordCard(d, t) {
     const rec = L.recordWeek(L.weekly(d.sess, db.plan), L.mondayOf(t));
     if (!rec) return '';
     const pct = rec.total > 0 ? Math.round(rec.current / rec.total * 100) : 0;
-    let h = '<section class="card"><div class="between"><div class="row-h gold">' + icon.cup + '<h2 class="fg">Рекордная неделя</h2></div><span class="muted sm">с ' + esc(dLong(rec.week)) + ' · ' + tons(rec.total) + ' т</span></div>';
+    let h = '<section class="card"><div class="between"><div class="row-h gold">' + icon.cup + '<h2 class="fg">Рекордная неделя</h2></div><b>' + tons(rec.total) + ' т</b></div><div class="muted sm">' + esc(weekRange(rec.week)) + '</div>';
     h += '<div class="bar gold" role="img" aria-label="Эта неделя: ' + pct + '% рекорда"><div style="width:' + Math.min(100, pct) + '%"></div></div>';
     if (rec.isCurrent && rec.count > 1) {
       h += '<div class="sm">Эта неделя — новый рекорд: <b>' + tons(rec.total) + ' т</b>' + (rec.prevBest ? ', прошлый лучший ' + tons(rec.prevBest) + ' т' : '') + '</div>';
