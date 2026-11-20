@@ -84,6 +84,8 @@ button.chip.lime { background: var(--lime-bg); }
 .dot { width: 14px; height: 14px; border-radius: 7px; border: 2px solid #5A616B; display: inline-block; }
 .dot.on { border: 0; background: var(--lime); }
 .dot.next { border-style: dashed; }
+.dot.miss { border-color: var(--red); background: linear-gradient(45deg, transparent 44%, var(--red) 44%, var(--red) 56%, transparent 56%); }
+.dotl.miss { color: var(--red); }
 .dotbtn { background: none; border: 0; padding: 6px 0; font: inherit; color: var(--fg); }
 .att { display: grid; grid-template-columns: 24px repeat(var(--cols), minmax(0, 1fr)); gap: 6px 0; justify-items: center; align-items: center; }
 .att > span:first-child, .att > .sm { justify-self: start; }
