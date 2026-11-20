@@ -2,26 +2,8 @@
   'use strict';
   const L = window.WL;
   const KEY = 'workout-app.v1';
-  const APP_VERSION = '10';
+  const APP_VERSION = '11';
   const app = document.getElementById('app');
-
-  // ---------- storage ----------
-  function load() {
-    try {
-      const d = JSON.parse(localStorage.getItem(KEY) || 'null');
-      if (d && Array.isArray(d.sets)) return { sets: d.sets, plan: Array.isArray(d.plan) && d.plan.length ? d.plan : L.DEFAULT_PLAN, finished: Array.isArray(d.finished) ? d.finished : [] };
-    } catch (e) { /* fall through */ }
-    return { sets: [], plan: L.DEFAULT_PLAN, finished: [] };
-  }
-  let db = load();
-  if (db.plan === L.DEFAULT_PLAN) db.plan = L.DEFAULT_PLAN.map((p) => ({ ...p }));
-  if (L.migrateNames(db)) save();
-  function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(db)); }
-    catch (e) { alert('Не удалось сохранить: ' + e.message); }
-    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-    markDirty();
-  }
 
   // ---------- Google Sheets sync ----------
   // The whole log is sent to an Apps Script web app bound to the Google Sheet,
@@ -51,6 +33,27 @@
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && sync.url && sync.dirty) pushSync(); });
   window.addEventListener('online', () => { if (sync.url && sync.dirty) pushSync(); });
+
+  // ---------- storage ----------
+  function load() {
+    try {
+      const d = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (d && Array.isArray(d.sets)) return { sets: d.sets, plan: Array.isArray(d.plan) && d.plan.length ? d.plan : L.DEFAULT_PLAN, finished: Array.isArray(d.finished) ? d.finished : [] };
+    } catch (e) { /* fall through */ }
+    return { sets: [], plan: L.DEFAULT_PLAN, finished: [] };
+  }
+  let db = load();
+  if (db.plan === L.DEFAULT_PLAN) db.plan = L.DEFAULT_PLAN.map((p) => ({ ...p }));
+  if (L.migrateNames(db)) save();
+  // Data fix (Nick, 2026-11-20): three Hammer Press sets were recorded on Wed 18.11 under «Пн» by mistake.
+  { const n = db.sets.length; db.sets = db.sets.filter((x) => !(x.date === '2026-11-18' && x.ex === 'Hammer Press' && x.slot === 'Пн')); if (db.sets.length !== n) save(); }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(db)); }
+    catch (e) { alert('Не удалось сохранить: ' + e.message); }
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    markDirty();
+  }
+
 
   // ---------- helpers ----------
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -107,6 +110,16 @@
     if (done.length && !(tg && tg.reps[idx] != null)) ui.r = done[done.length - 1].r;
   }
 
+  // Today's workout: the slot of sets already recorded today, else the slot of the weekday (Пн/Ср/Пт), else none.
+  function todaysSlot() {
+    const t = todayIso();
+    const rec = db.sets.filter((s) => s.date === t).map((s) => L.slotOf(s, db.plan)).filter(Boolean);
+    if (rec.length) return rec[rec.length - 1];
+    const wd = (L.parseIso(t).getDay() + 6) % 7;
+    return wd === 0 ? 'Пн' : wd === 2 ? 'Ср' : wd === 4 ? 'Пт' : null;
+  }
+  const weekdayName = () => dFmt(todayIso(), { weekday: 'long' });
+
   function setActive(ex, d) { ui.active = ex; if (ex) prefill(ex, d); }
 
   // ---------- screens ----------
@@ -131,6 +144,8 @@
     let h = '<main class="screen">';
     h += '<header class="head"><h1 class="date">' + esc(dayLong(t)) + '</h1>';
     h += '<div class="seg" role="group" aria-label="День плана">' + L.SLOTS.map((s) => '<button type="button" data-act="slot" data-slot="' + s + '" aria-pressed="' + (s === ui.slot) + '"' + (s === ui.slot ? ' class="on"' : '') + '>' + s + '</button>').join('') + '</div></header>';
+    const expSlot = todaysSlot();
+    if (expSlot && ui.slot !== expSlot) h += '<div class="warn sm">Открыта тренировка <b>' + ui.slot + '</b>, а сегодня ' + esc(weekdayName()) + ' — тренировка ' + expSlot + '. <button type="button" class="linkbtn lime" data-act="slot" data-slot="' + expSlot + '">Вернуться к ' + expSlot + '</button></div>';
     h += '<div class="prog"><div class="bar"><div style="width:' + Math.round(nDone / Math.max(1, exs.length) * 100) + '%"></div></div><span>' + nDone + ' из ' + exs.length + ' ' + plural(exs.length, 'упражнения', 'упражнений', 'упражнений') + '</span></div>';
 
     exs.forEach((p, i) => {
@@ -491,6 +506,16 @@
     else if (act === 'usew') ui.w = Number(b.dataset.w);
     else if (act === 'weeksel') ui.weekSel = b.dataset.w;
     else if (act === 'add') {
+      // A quick second tap (double tap) must not record a second set.
+      if (Date.now() - (ui.lastAdd || 0) < 800) return;
+      // Recording into another day's workout needs an explicit yes, once per day and slot.
+      const expSlot = todaysSlot();
+      const okKey = todayIso() + '|' + ui.slot;
+      if (expSlot && ui.slot !== expSlot && ui.slotOk !== okKey) {
+        if (!confirm('Сегодня ' + weekdayName() + ', тренировка ' + expSlot + '. Записать «' + ui.active + '» в тренировку ' + ui.slot + '?')) return;
+        ui.slotOk = okKey;
+      }
+      ui.lastAdd = Date.now();
       db.sets.push({ id: L.newId(), date: todayIso(), slot: ui.slot, ex: ui.active, w: ui.w, r: ui.r });
       save();
       const p = db.plan.find((x) => x.name === ui.active);
@@ -538,7 +563,7 @@
         const unknown = [...new Set(sets.map((s) => s.ex))].filter((x) => !db.plan.some((p) => p.name === x));
         const msg = 'Найдено подходов: ' + sets.length + (skipped ? '\nПропущено строк без веса или повторов: ' + skipped : '') + (unknown.length ? '\nУпражнения не из плана (в статистику не попадут): ' + unknown.join(', ') : '') + (db.sets.length ? '\n\nТекущие записи (' + db.sets.length + ') будут заменены.' : '') + '\n\nЗагрузить?';
         if (!confirm(msg)) return;
-        db.sets = sets; db.finished = [...new Set(sets.map((s) => s.date))].filter((x) => x < todayIso());
+        db.sets = sets; db.finished = [...new Set(sets.map((s) => s.date))].filter((x) => x <= todayIso()); // today's imported workout is closed too, so «Записать подход» isn't left one tap away
         save(); ui.active = null; ui.slot = null;
         alert('Готово: загружено ' + sets.length + ' подходов.');
         render();
