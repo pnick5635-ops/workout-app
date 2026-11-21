@@ -2,7 +2,7 @@
   'use strict';
   const L = window.WL;
   const KEY = 'workout-app.v1';
-  const APP_VERSION = '13';
+  const APP_VERSION = '15';
   const app = document.getElementById('app');
 
   // ---------- Google Sheets sync ----------
@@ -59,6 +59,7 @@
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (n) => (Math.round(n * 10) / 10).toString().replace('.', ',');
   const tons = (kg) => fmt(Math.round(kg / 100) / 10);
+  const kgs = (kg) => Math.round(kg).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0');
   const todayIso = () => L.isoOf(new Date());
   const dFmt = (iso, opts) => new Intl.DateTimeFormat('ru', opts).format(L.parseIso(iso));
   const dayLong = (iso) => { const s = dFmt(iso, { weekday: 'long', day: 'numeric', month: 'long' }); return s[0].toUpperCase() + s.slice(1); };
@@ -84,11 +85,13 @@
     gym: '<svg aria-hidden="true" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7v8M7 5v12M15 5v12M18 7v8M7 11h8"/></svg>',
     chart: '<svg aria-hidden="true" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 7-9"/></svg>',
     gear: '<svg aria-hidden="true" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="3"/><path d="M11 2.5v2.2M11 17.3v2.2M2.5 11h2.2M17.3 11h2.2M5 5l1.6 1.6M15.4 15.4L17 17M5 17l1.6-1.6M15.4 6.6L17 5"/></svg>',
+    flame: '<svg aria-hidden="true" width="15" height="15" viewBox="0 0 22 22" fill="none" stroke="#FFB547" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2.5c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.5-4 2.5-5 0 2 1 3 2 3 0-3-.5-5.5.5-8z"/></svg>',
+    plus: '<svg aria-hidden="true" width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M11 4v14M4 11h14"/></svg>',
     x: '<svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 3l6 6M9 3l-6 6"/></svg>'
   };
 
   // ---------- ui state ----------
-  const ui = { screen: 'today', slot: null, active: null, w: 0, r: 0, progressEx: null };
+  const ui = { screen: 'today', slot: null, active: null, w: 0, r: 0, progressEx: null, startDay: null };
 
   function derived() {
     const sess = L.sessions(db.sets, db.plan);
@@ -133,7 +136,11 @@
     const d = derived();
     const t = todayIso();
     if (!ui.slot) ui.slot = L.defaultSlot(db.sets, db.plan, t);
-    if (db.finished.includes(t) && db.sets.some((s) => s.date === t)) return screenWeek(d, t);
+    const hasToday = db.sets.some((s) => s.date === t);
+    if (db.finished.includes(t) && hasToday) return screenWeek(d, t);
+    // Off-plan days (Вт, Чт, Сб, Вс) open on the week screen; «Начать новую тренировку» opens the workout.
+    const offDay = !isPlanSlot(L.dayOf(t));
+    if (offDay && !hasToday && ui.startDay !== t) return screenWeek(d, t);
     const exs = L.slotExercises(db.plan, ui.slot);
     const counts = exs.map((p) => todaySets(p.name).length);
     const nDone = exs.filter((p, i) => counts[i] >= L.planSets(p)).length;
@@ -141,11 +148,12 @@
       const next = exs.find((p, i) => counts[i] < L.planSets(p));
       setActive(next ? next.name : null, d);
     }
-    let h = '<main class="screen">';
-    h += '<header class="head"><h1 class="date">' + esc(dayLong(t)) + '</h1>';
-    h += '<div class="seg" role="group" aria-label="День плана">' + L.SLOTS.map((s) => '<button type="button" data-act="slot" data-slot="' + s + '" aria-pressed="' + (s === ui.slot) + '"' + (s === ui.slot ? ' class="on"' : '') + '>' + s + '</button>').join('') + '</div></header>';
     const expSlot = todaysSlot();
-    if (!isPlanSlot(expSlot)) h += '<div class="warn sm">Сегодня ' + esc(weekdayName()) + ' — подходы запишутся как отдельная тренировка <b>' + expSlot + '</b>. Упражнения можно брать с любой вкладки.</div>';
+    let h = '<main class="screen">';
+    if (offDay && !hasToday) h += '<button type="button" class="backlink" data-act="home">‹ Неделя</button>';
+    h += '<header class="head"><div class="headcol"><div class="date">' + esc(dayLong(t)) + '</div><h1 class="title">Тренировка ' + esc(expSlot) + '</h1></div>';
+    h += '<div class="seg" role="group" aria-label="День плана">' + L.SLOTS.map((s) => '<button type="button" data-act="slot" data-slot="' + s + '" aria-pressed="' + (s === ui.slot) + '"' + (s === ui.slot ? ' class="on"' : '') + '>' + s + '</button>').join('') + '</div></header>';
+    if (!isPlanSlot(expSlot)) h += '<div class="info sm">Сегодня ' + esc(weekdayName()) + ' — подходы запишутся в тренировку <b>' + expSlot + '</b>. Упражнения можно взять из вкладок Пн, Ср или Пт.</div>';
     else if (ui.slot !== expSlot) h += '<div class="warn sm">Упражнения тренировки <b>' + ui.slot + '</b> запишутся в сегодняшнюю тренировку <b>' + expSlot + '</b>. <button type="button" class="linkbtn lime" data-act="slot" data-slot="' + expSlot + '">Вернуться к ' + expSlot + '</button></div>';
     h += '<div class="prog"><div class="bar"><div style="width:' + Math.round(nDone / Math.max(1, exs.length) * 100) + '%"></div></div><span>' + nDone + ' из ' + exs.length + ' ' + plural(exs.length, 'упражнения', 'упражнений', 'упражнений') + '</span></div>';
 
@@ -197,52 +205,56 @@
     const next = nextWorkout(d, t);
     const weekOver = !next.sameWeek;
 
-    let h = '<main class="screen"><header class="head col"><h1 class="date">' + esc(dayLong(t)) + '</h1>';
-    h += '<h2 class="title">' + (weekOver ? 'Неделя завершена' : 'Неделя с ' + esc(dLong(wk))) + '</h2></header>';
+    let h = '<main class="screen"><header class="head col"><div class="date">' + esc(dayLong(t)) + '</div>';
+    h += '<h1 class="title">' + (weekOver ? 'Неделя завершена' : 'Неделя ' + esc(weekRange(wk))) + '</h1></header>';
 
-    // week summary
-    h += '<section class="card"><div class="between"><h2 class="lbl">' + (weekOver ? 'Неделя с ' + esc(dLong(wk)) : 'Тренировки недели') + '</h2><b>' + doneDate.size + ' из 3</b></div><div class="dots">';
+    const rec = L.recordWeek(L.weekly(d.sess, db.plan), wk);
+    const recordNow = rec && rec.isCurrent && rec.count > 1;
+    if (recordNow) h += recordHero(rec);
+
+    // week: workouts by day with their tonnage; tap a done day to open its summary
+    const tonBy = new Map(); weekSess.forEach((s) => tonBy.set(s.slot, (tonBy.get(s.slot) || 0) + s.tonnage));
+    const streak = fullWeekStreak(d, wk);
+    h += '<section class="card"><div class="between"><h2>' + doneDate.size + ' из 3</h2>' + (streak >= 2 ? '<span class="muted sm streak">' + icon.flame + streak + ' ' + plural(streak, 'полная неделя', 'полные недели', 'полных недель') + ' подряд</span>' : '') + '</div><div class="days">';
     L.DAYS.filter((s) => isPlanSlot(s) || doneDate.has(s)).forEach((s) => {
-      if (doneDate.has(s)) h += '<button type="button" class="dotl on dotbtn" data-act="daysum" data-date="' + doneDate.get(s) + '" aria-label="Итог тренировки ' + s + '"><span class="dot on"></span>' + s + ' ›</button>';
-      else if (L.addDays(wk, SLOT_OFFSET[s]) < t) h += '<span class="dotl miss" aria-label="' + s + ' — пропущена"><span class="dot miss"></span>' + s + '</span>';
-      else h += '<span class="dotl"><span class="dot' + (!weekOver && s === next.slot ? ' next' : '') + '"></span>' + s + '</span>';
+      if (doneDate.has(s)) h += '<button type="button" class="day on" data-act="daysum" data-date="' + doneDate.get(s) + '" aria-label="Итог тренировки ' + s + '"><span class="dball on">' + icon.check + '</span><b>' + s + '</b><span class="muted sm">' + kgs(tonBy.get(s)) + ' кг</span></button>';
+      else if (L.addDays(wk, SLOT_OFFSET[s]) < t) h += '<span class="day miss" aria-label="' + s + ' — пропущена"><span class="dball miss"></span><b>' + s + '</b><span class="sm">пропущена</span></span>';
+      else h += '<span class="day"><span class="dball' + (!weekOver && s === next.slot ? ' next' : '') + '"></span><b>' + s + '</b><span class="muted sm">' + esc(dShort(L.addDays(wk, SLOT_OFFSET[s]))) + '</span></span>';
     });
-    h += '</div><div class="between sm"><span>Тоннаж недели: <b>' + tons(total) + ' т</b></span>';
-    if (prevTotal > 0) {
-      if (weekOver) { const diff = total - prevTotal; h += '<span class="' + (diff > 0 ? 'lime' : 'muted') + '">' + (diff >= 0 ? '+' : '−') + tons(Math.abs(diff)) + ' т к прошлой</span>'; }
-      else h += '<span class="muted">прошлая неделя ' + tons(prevTotal) + ' т</span>';
+    h += '</div>';
+    if (!recordNow) {
+      h += '<div class="between sm"><span>Тоннаж недели: <b>' + kgs(total) + ' кг</b></span>';
+      if (prevTotal > 0) {
+        if (weekOver) { const diff = total - prevTotal; h += '<span class="' + (diff > 0 ? 'lime' : 'muted') + '">' + (diff >= 0 ? '+' : '−') + tons(Math.abs(diff)) + ' т к прошлой</span>'; }
+        else h += '<span class="muted">прошлая неделя ' + kgs(prevTotal) + ' кг</span>';
+      }
+      h += '</div>';
     }
-    h += '</div><div class="muted sm">Нажмите на день, чтобы открыть итог</div></section>';
+    h += '</section>';
 
-    // weight records this week
-    // one line per exercise: best before this week → best this week
+    // weight records this week: best before this week → best this week
     const recMap = new Map();
     [...new Set(weekSess.map((s) => s.date))].sort().forEach((date) => L.weightRecords(d.sess, date).forEach((r) => {
       const o = recMap.get(r.ex); recMap.set(r.ex, { ex: r.ex, prevBest: o ? o.prevBest : r.prevBest, weight: r.weight });
     }));
     const recs = [...recMap.values()];
-    const rec = L.recordWeek(L.weekly(d.sess, db.plan), wk);
-    const recordNow = rec && rec.isCurrent && rec.count > 1;
-    if (recordNow) h += recordHero(rec);
     if (recs.length) {
-      h += '<section class="card gold-card"><div class="row-h gold">' + icon.cup + '<h2>' + recs.length + ' ' + plural(recs.length, 'рекорд', 'рекорда', 'рекордов') + ' веса за неделю</h2></div>';
-      recs.forEach((r) => { h += '<div class="between"><span class="name">' + esc(r.ex) + '</span><span class="right"><span class="tan">' + fmt(r.prevBest) + ' → </span><span class="gold">' + fmt(r.weight) + ' кг</span></span></div>'; });
+      h += '<section class="card"><h2>Рекорды веса за неделю</h2>';
+      recs.forEach((r) => { h += '<div class="between"><div><div class="name">' + esc(r.ex) + '</div><div class="sub">было ' + fmt(r.prevBest) + ' кг</div></div><span class="badge gold">' + fmt(r.weight) + ' кг</span></div>'; });
       h += '</section>';
     }
     if (!recordNow) h += recordCard(d, t);
 
-    // next workout — only mid-week; the final week screen is a summary
-    if (!weekOver) {
-      h += '<section class="card"><div class="between"><h2>Следующая — ' + next.slot + '</h2><span class="muted sm">' + esc(dayLong(next.date)) + '</span></div>';
-      L.slotExercises(db.plan, next.slot).forEach((p) => {
-        const tg = L.target(d.byEx.get(p.name) || [], p);
-        h += '<div class="between"><span class="name">' + esc(p.name) + '</span><span class="right' + (tg && tg.kind === 'add' ? ' lime' : '') + '">' + esc(tg ? targetText(tg) : 'первая запись') + '</span></div>';
-      });
-      h += '</section>';
-    }
-
-    h += '<button type="button" class="btn ghost" data-act="reopen">Продолжить запись сегодня</button>';
+    h += '<button type="button" class="btn big" data-act="start">' + icon.plus + 'Начать новую тренировку</button>';
     return h + '</main>';
+  }
+
+  // Full weeks (3 workouts) in a row, ending with this week if it is full, else with the last week.
+  function fullWeekStreak(d, wk) {
+    const per = new Map(); L.weekly(d.sess, db.plan).forEach((r) => per.set(r.week, (per.get(r.week) || 0) + 1));
+    let w = (per.get(wk) || 0) >= 3 ? wk : L.addDays(wk, -7), n = 0;
+    while ((per.get(w) || 0) >= 3) { n++; w = L.addDays(w, -7); }
+    return n;
   }
 
   function targetText(tg) {
@@ -335,8 +347,8 @@
   // The current week is the best ever: a filled gold banner on top of the week screen.
   function recordHero(rec) {
     let h = '<section class="card hero-gold"><div class="row-h">' + icon.cup + '<h2>Рекордная неделя</h2></div>';
-    h += '<div class="hero-num">' + tons(rec.total) + ' т</div>';
-    h += '<div class="sm">Лучший тоннаж за всё время' + (rec.prevBest ? ' · прошлый рекорд ' + tons(rec.prevBest) + ' т' : '') + '</div>';
+    h += '<div class="hero-num">' + kgs(rec.total) + ' кг</div>';
+    h += '<div class="sm">' + esc(weekRange(rec.week)) + (rec.prevBest ? ' · +' + tons(rec.total - rec.prevBest) + ' т к прошлому рекорду' : ' · лучший тоннаж за всё время') + '</div>';
     return h + '</section>';
   }
 
@@ -395,7 +407,7 @@
     const last = ex[ex.length - 1], firstS = ex[0];
     const diff = last.topWeight - firstS.topWeight;
     h += '<section class="card"><label class="lbl" for="exsel">Упражнение</label><select id="exsel" data-act="exsel">' + names.map((n) => '<option' + (n === ui.progressEx ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select>';
-    h += '<div class="between"><div class="muted sm">рабочий вес · ' + (diff > 0 ? '+' : diff < 0 ? '−' : '±') + fmt(Math.abs(diff)) + ' кг с ' + esc(dLong(firstS.date)) + '</div><div class="big">' + fmt(last.topWeight) + ' кг</div></div>';
+    h += '<div class="between"><div class="muted sm">рабочий вес · ' + fmt(firstS.topWeight) + ' → ' + fmt(last.topWeight) + ' кг (' + (diff > 0 ? '+' : diff < 0 ? '−' : '±') + fmt(Math.abs(diff)) + ') с ' + esc(dLong(firstS.date)) + '</div><div class="big">' + fmt(last.topWeight) + ' кг</div></div>';
     h += chart(ex) + '</section>';
 
     // ready to add weight
@@ -443,7 +455,7 @@
 
   function chart(ex) {
     if (ex.length < 2) return '<div class="muted sm">Нужно хотя бы две тренировки для графика</div>';
-    const W = 320, H = 110, ml = 6, mr = 6, mt = 14, mb = 18;
+    const W = 320, H = 120, ml = 6, mr = 6, mt = 22, mb = 18;
     const xs = ex.map((s) => L.parseIso(s.date).getTime());
     const x0 = xs[0], x1 = xs[xs.length - 1];
     const ws = ex.map((s) => s.topWeight);
@@ -458,7 +470,15 @@
     ex.forEach((s, i) => { svg += '<circle cx="' + X(xs[i]).toFixed(1) + '" cy="' + Y(s.topWeight).toFixed(1) + '" r="' + (i === ex.length - 1 ? 4.5 : 3) + '" class="pt"/>'; });
     svg += '<text x="' + ml + '" y="' + (H - 4) + '" class="tx">' + esc(dShort(ex[0].date)) + '</text>';
     svg += '<text x="' + (W - mr) + '" y="' + (H - 4) + '" text-anchor="end" class="tx">' + esc(dShort(ex[ex.length - 1].date)) + '</text>';
-    svg += '<text x="' + ml + '" y="10" class="tx">' + fmt(hi) + '</text>';
+    // Weight labels: start, current, and the peak if it is a different point.
+    let iMax = 0; ws.forEach((v, i) => { if (v > ws[iMax]) iMax = i; });
+    const marks = [0, ex.length - 1]; if (iMax !== 0 && iMax !== ex.length - 1 && ws[iMax] !== ws[0] && ws[iMax] !== ws[ex.length - 1]) marks.push(iMax);
+    marks.forEach((i) => {
+      const x = X(xs[i]), y = Y(ws[i]);
+      const anchor = i === 0 ? 'start' : i === ex.length - 1 ? 'end' : 'middle';
+      const ty = y - 8 < 10 ? y + 15 : y - 8;
+      svg += '<text x="' + (i === 0 ? ml : i === ex.length - 1 ? W - mr : x).toFixed(1) + '" y="' + ty.toFixed(1) + '" text-anchor="' + anchor + '" class="tx val">' + fmt(ws[i]) + ' кг</text>';
+    });
     return svg + '</svg>';
   }
 
@@ -539,6 +559,13 @@
       ui.sumDate = null; ui.screen = 'today'; ui.active = null; window.scrollTo(0, 0);
     }
     else if (act === 'reopen') { db.finished = db.finished.filter((x) => x !== todayIso()); save(); ui.active = null; }
+    else if (act === 'start') {
+      // A closed workout today reopens (new sets go to today's workout); otherwise the off-day workout opens.
+      const t = todayIso();
+      if (db.finished.includes(t)) { db.finished = db.finished.filter((x) => x !== t); save(); }
+      ui.startDay = t; ui.slot = L.defaultSlot(db.sets, db.plan, t); ui.active = null; window.scrollTo(0, 0);
+    }
+    else if (act === 'home') { ui.startDay = null; ui.active = null; window.scrollTo(0, 0); }
     else if (act === 'export') return doExport();
     else if (act === 'syncset') {
       const v = (document.getElementById('syncUrl').value || '').trim();
